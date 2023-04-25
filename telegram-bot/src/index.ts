@@ -15,6 +15,10 @@ const BOT_DOWNLOAD_FILE = 'file'
 const BOT_GET_FILE = 'getFile'
 const BOT_SECRET_HEADER = 'X-Telegram-Bot-Api-Secret-Token'
 
+const MESSAGE_COMMAND = "command"
+const MESSAGE_TEXT = "text"
+const MESSAGE_VOICE = "voice"
+const MESSAGE_UNKNOWN = "unknown"
 
 export default {
     async fetch(request, env) {
@@ -25,7 +29,7 @@ export default {
 async function handleRequest(request, env) {
     const url = new URL(request.url)
     if (url.pathname === API_WEBHOOK) {
-        return await handlerChatRequest(request, env)
+        return await handlerBotRequest(request, env)
     } else if (url.pathname === API_REGISTER) {
         return await registerWebhook(url, API_WEBHOOK, env)
     } else if (url.pathname === API_UNREGISTER) {
@@ -68,7 +72,7 @@ async function registerWebhook(requestUrl, suffix, env) {
 }
 
 
-async function handlerChatRequest(request, env) {
+async function handlerBotRequest(request, env) {
     // Check secret
     const botKey = env.BOT_SECRET
     if (request.headers.get(BOT_SECRET_HEADER) !== botKey) {
@@ -79,7 +83,21 @@ async function handlerChatRequest(request, env) {
     console.log("update info " + JSON.stringify(update))
     const chatId = update.message.chat.id
     const botToken = env.BOT_TOKEN
-    const update_message = await extractTelegramMessage(update.message, botToken, env)
+    const messageType = checkMessageType(update.message)
+    switch (messageType) {
+        case "command":
+            return await processCommand(chatId,update.message, botToken, env)
+        case "text":
+        case "voice":
+            return await processChat(chatId, update.message, botToken, env)
+        case "unknown":
+            return await sendTextMessage(chatId, "", "すみません", botToken)
+    }
+
+}
+
+async function processChat(chatId, message, botToken, env) {
+    const update_message = await extractTelegramMessage(message, botToken, env)
     const aiResponse = await chatWithAI(update_message, env);
     const audioData = await textToSpeech(aiResponse, env)
     const textMessage = await sendTextMessage(chatId, update_message, aiResponse, botToken)
@@ -87,10 +105,25 @@ async function handlerChatRequest(request, env) {
     return textMessage
 }
 
+async function processCommand(chatId,message, botToken, env) {
+    const command = message.text
+    let response = "success"
+    switch (command) {
+        case "/enable":
+            response = "enable context success"
+            break
+        case "/disable":
+            response = "disable context success"
+            break
+        case "/customize":
+            response = "please set your prompt"
+            break
+    }
+    const textMessage = await sendTextMessage(chatId, "", response, botToken)
+    return textMessage
+}
 
 async function extractTelegramMessage(message, secret: string, env) {
-    const isCommand = 'entities' in message
-
     if ('text' in message) {
         return message.text
     } else if ('voice' in message) {
@@ -99,6 +132,7 @@ async function extractTelegramMessage(message, secret: string, env) {
         return "こにちは"
     }
 }
+
 
 async function processVoiceMessage(message, secret: string, env) {
     const fileId = message.voice.file_id
@@ -155,10 +189,10 @@ async function chatWithAI(update_message: string, env) {
         body: chatRequest
     });
     const aiData = await aiResponse.json();
-    if ('choices'  in aiData ){
+    if ('choices' in aiData) {
         const aiChoices = aiData.choices[0].message.content;
         return aiChoices
-    }else{
+    } else {
         return "すみません"
     }
 
@@ -322,3 +356,14 @@ function buildSpeechToTextHeader(speechKey: string) {
 
 }
 
+function checkMessageType(message) {
+    if ('entities' in message) {
+        return MESSAGE_COMMAND
+    } else if ('text' in message) {
+        return MESSAGE_TEXT
+    } else if ('voice' in message) {
+        return MESSAGE_VOICE
+    } else {
+        return MESSAGE_UNKNOWN
+    }
+}
