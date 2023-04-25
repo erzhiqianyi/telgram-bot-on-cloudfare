@@ -1,0 +1,11 @@
+name = "telegram-bot"
+main = "src/index.ts"
+compatibility_date = "2023-04-24"
+usage_model = "bundled"
+env = { }
+
+[triggers]
+crons = [ ]
+
+[vars]
+SPEECH_REGION = "eastasia"
