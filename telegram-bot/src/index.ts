@@ -71,7 +71,7 @@ async function registerWebhook(requestUrl, suffix, env) {
 async function handlerChatRequest(request, env) {
     // Check secret
     const botKey = env.BOT_SECRET
-    if (request.headers.get(BOT_SECRET_HEADER ) !== botKey) {
+    if (request.headers.get(BOT_SECRET_HEADER) !== botKey) {
         return new Response('Unauthorized', {status: 403})
     }
     console.log(" process request ")
@@ -89,6 +89,8 @@ async function handlerChatRequest(request, env) {
 
 
 async function extractTelegramMessage(message, secret: string, env) {
+    const isCommand = 'entities' in message
+
     if ('text' in message) {
         return message.text
     } else if ('voice' in message) {
@@ -153,8 +155,12 @@ async function chatWithAI(update_message: string, env) {
         body: chatRequest
     });
     const aiData = await aiResponse.json();
-    const aiChoices = aiData.choices[0].message.content;
-    return aiChoices
+    if ('choices'  in aiData ){
+        const aiChoices = aiData.choices[0].message.content;
+        return aiChoices
+    }else{
+        return "すみません"
+    }
 
 }
 
