@@ -1,0 +1,23 @@
+{
+  "update_id": 248804133,
+  "message": {
+    "message_id": 4954,
+    "from": {
+      "id": 1,
+      "is_bot": false,
+      "first_name": "二之前",
+      "last_name": "一",
+      "username": "erzhiqianyi",
+      "language_code": "zh-hans"
+    },
+    "chat": {
+      "id": 1,
+      "first_name": "me",
+      "last_name": "一",
+      "username": "erzhiqianyi",
+      "type": "private"
+    },
+    "date": 1682254730,
+    "text": "こんにちは"
+  }
+}

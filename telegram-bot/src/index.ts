@@ -19,6 +19,51 @@ const MESSAGE_COMMAND = "command"
 const MESSAGE_TEXT = "text"
 const MESSAGE_VOICE = "voice"
 const MESSAGE_UNKNOWN = "unknown"
+const MESSAGE_REPLAY = "replay"
+const BUTTON_MESSAGE = "请选择:"
+const BUTTON_TOP = [
+    [
+        {
+            text: '上下文消息个数',
+            callback_data: 'context'
+        },
+        {
+            text: '工坊',
+            callback_data: 'tools'
+        }
+    ]
+]
+const BUTTON_CONTEXT = [
+    [
+        {
+            text: '1',
+            callback_data: '1'
+        },
+        {
+            text: '4',
+            callback_data: '4'
+        },
+        {
+            text: '10',
+            callback_data: '10'
+        },
+        {
+            text: '30',
+            callback_data: '30'
+        },
+        {
+            text: '50',
+            callback_data: '50'
+        }
+    ],
+    [
+        {
+            text: '返回上一级',
+            callback_data: 'back_top'
+        }
+    ]
+]
+
 
 export default {
     async fetch(request, env) {
@@ -80,18 +125,43 @@ async function handlerBotRequest(request, env) {
     }
     console.log(" process request ")
     const update = await request.json();
-    console.log("update info " + JSON.stringify(update))
-    const chatId = update.message.chat.id
     const botToken = env.BOT_TOKEN
-    const messageType = checkMessageType(update.message)
+    console.log("update info " + JSON.stringify(update))
+    const message = checkMessageType(update)
+    const messageType = message.command
+    const messageData = message.data
+    const chatId = getChatId(messageData)
     switch (messageType) {
+        case "replay":
+            return await replayCommand(chatId, messageData.data, botToken, env)
         case "command":
-            return await processCommand(chatId,update.message, botToken, env)
+            return await processCommand(chatId, messageData, botToken, env)
         case "text":
         case "voice":
-            return await processChat(chatId, update.message, botToken, env)
+            return await processChat(chatId, messageData, botToken, env)
         case "unknown":
             return await sendTextMessage(chatId, "", "すみません", botToken)
+    }
+
+}
+
+function getChatId(message) {
+    let chatMessage = message
+    if ("message" in message) {
+        chatMessage = message.message
+    }
+    return chatMessage.chat.id
+}
+
+async function replayCommand(chatId, command, botToken, env) {
+    switch (command) {
+        case "context":
+            const result = await sendInlineButtons(chatId, botToken, BUTTON_MESSAGE, BUTTON_CONTEXT)
+            console.log(await result.json())
+            return new Response("ok")
+        case "tools":
+            return sendTextMessage(chatId, "", "工具正在开发中", botToken)
+
     }
 
 }
@@ -105,22 +175,33 @@ async function processChat(chatId, message, botToken, env) {
     return textMessage
 }
 
-async function processCommand(chatId,message, botToken, env) {
+async function processCommand(chatId, message, botToken, env) {
     const command = message.text
-    let response = "success"
     switch (command) {
-        case "/enable":
-            response = "enable context success"
-            break
-        case "/disable":
-            response = "disable context success"
-            break
-        case "/customize":
-            response = "please set your prompt"
-            break
+        case "/menu":
+            return await sendInlineButtons(chatId, botToken, BUTTON_MESSAGE, BUTTON_TOP)
+        default:
+            return sendTextMessage(chatId, "", "无效操作", botToken)
     }
-    const textMessage = await sendTextMessage(chatId, "", response, botToken)
-    return textMessage
+}
+
+/**
+ * Send a message with buttons, `buttons` must be an array of arrays of button objects
+ * https://core.telegram.org/bots/api#sendmessage
+ */
+async function sendInlineButtons(chatId, token, text, buttons) {
+    const parameters = {
+        chat_id: chatId,
+        reply_markup: JSON.stringify({
+            inline_keyboard: buttons
+        }),
+        text: text
+    }
+    const url = buildTelegramUrl(BOT_SEND_MESSAGE, token, parameters)
+    console.log(url)
+    const buttonResponse = await fetch(url);
+    return buttonResponse
+
 }
 
 async function extractTelegramMessage(message, secret: string, env) {
@@ -356,14 +437,25 @@ function buildSpeechToTextHeader(speechKey: string) {
 
 }
 
-function checkMessageType(message) {
-    if ('entities' in message) {
-        return MESSAGE_COMMAND
-    } else if ('text' in message) {
-        return MESSAGE_TEXT
-    } else if ('voice' in message) {
-        return MESSAGE_VOICE
-    } else {
-        return MESSAGE_UNKNOWN
+function checkMessageType(update) {
+    let message = null
+    let command = MESSAGE_UNKNOWN
+    if ('message' in update) {
+        message = update.message
+        if ('entities' in message) {
+            command = MESSAGE_COMMAND
+        } else if ('text' in message) {
+            command = MESSAGE_TEXT
+        } else if ('voice' in message) {
+            command = MESSAGE_VOICE
+        }
+    } else if ('callback_query' in update) {
+        message = update.callback_query
+        command = MESSAGE_REPLAY
+    }
+
+    return {
+        "command": command,
+        "data": message
     }
 }

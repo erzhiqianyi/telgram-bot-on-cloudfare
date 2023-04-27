@@ -1,0 +1,48 @@
+{
+  "update_id": 248804298,
+  "callback_query": {
+    "id": "1607879194855170152",
+    "from": {
+      "id": 1,
+      "is_bot": false,
+      "first_name": "二之前",
+      "last_name": "一",
+      "username": "erzhiqianyi",
+      "language_code": "zh-hans"
+    },
+    "message": {
+      "message": "_i149",
+      "from": {
+        "id": 6249167503,
+        "is_bot": true,
+        "first_name": "リンクちゃん",
+        "username": "link_chan_bot"
+      },
+      "chat": {
+        "id": 1,
+        "last_name": "二之前",
+        "last_name": "一",
+        "username": "erzhiqianyi",
+        "type": "private"
+      },
+      "date": 1682604899,
+      "text": "请选择:",
+      "reply": {
+        "inline_keyboard": [
+          [
+            {
+              "text": "上下文消息个数",
+              "callback_data": "context"
+            },
+            {
+              "text": "工坊",
+              "callback_data": "tools"
+            }
+          ]
+        ]
+      }
+    },
+    "tance": "1785335158193981277",
+    "data": "context"
+  }
+}
