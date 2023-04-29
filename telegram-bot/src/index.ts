@@ -59,13 +59,24 @@ const BUTTON_CONTEXT = [
     ],
     [
         {
+            text: '清除历史记录',
+            callback_data: 'ct_-1'
+        }
+    ],
+    [
+        {
             text: '返回上一级',
             callback_data: 'back_top'
         }
     ]
+
 ]
+
+const CHAT_MAX_NUM = 100
 const CHAT_CONTEXT_NUMBER = new Map<string, number>();
-const CHAT_HISTORY = new Map<String, Array<String>>()
+const CHAT_HISTORY = new Map<String, String>()
+
+
 export default {
     async fetch(request, env) {
         return handleRequest(request, env)
@@ -94,7 +105,6 @@ async function unRegisterWebhook(env) {
         url: ''
     }
     const url = buildTelegramUrl(BOT_SEB_WEBHOOK, token, unRegisterData)
-    console.log(url)
     const unRegisterResponse = await fetch(url);
     return unRegisterResponse
 }
@@ -111,8 +121,6 @@ async function registerWebhook(requestUrl, suffix, env) {
         url: webhookUrl, secret_token: secret
     }
     const url = buildTelegramUrl(BOT_SEB_WEBHOOK, token, registerData)
-    console.log('webhook url ' + webhookUrl)
-    console.log('url is ' + url)
     const registerResponse = await fetch(url);
     return registerResponse
 }
@@ -158,8 +166,7 @@ async function replayCommand(chatId, command, botToken, env) {
     console.log("command type is " + command)
     switch (command) {
         case "context":
-            let contextNumber = CHAT_CONTEXT_NUMBER.get(chatId)
-            contextNumber = contextNumber == undefined ? 0 : contextNumber
+            let contextNumber = await getContextNum(chatId)
             const message = "当前上下文数量" + contextNumber
             const result = await sendInlineButtons(chatId, botToken, message, BUTTON_CONTEXT)
             return new Response("ok")
@@ -180,18 +187,83 @@ async function replaySecondMand(chatId, command, botToken, env) {
 
 async function setContext(chatId, command, botToken, env) {
     const contextNum = command.replace("ct_", "")
-    CHAT_CONTEXT_NUMBER.set(chatId, contextNum)
-    return sendTextMessage(chatId, "", "上下文数量已经设置成" + contextNum, botToken)
+    if (contextNum == "-1") {
+        return await clearHistory(chatId, botToken)
+    } else {
+        CHAT_CONTEXT_NUMBER.set(chatId, contextNum)
+        return await sendTextMessage(chatId, "", "上下文数量已经设置成" + contextNum, botToken)
+    }
+}
+
+async function clearHistory(chatId, botToken) {
+    const history = await getHistory(chatId)
+    const allHistory = history.flat().join("\n")
+    CHAT_HISTORY.set(chatId, null)
+    return sendTextMessage(chatId, "聊天记录", allHistory, botToken)
+}
+
+async function getContextMessage(chatId) {
+    const history = await getHistory(chatId)
+    const contextNum = await getContextNum(chatId)
+    if (contextNum == 0) {
+        return []
+    }
+    const contextHistory = history.splice(-contextNum)
+    const contextMessage = []
+    contextHistory.forEach(function (element) {
+        const userChat = {
+            "role": "user",
+            "content": element[0]
+        }
+        const aiChat = {
+            "role": "assistant",
+            "content": element[1]
+        }
+        contextMessage.push(userChat)
+        contextMessage.push(aiChat)
+    });
+    return contextMessage
+
+}
+
+async function getContextNum(chatId) {
+    let contextNumber = CHAT_CONTEXT_NUMBER.get(chatId)
+    contextNumber = contextNumber == undefined ? 0 : contextNumber
+    return contextNumber
+}
+
+async function getHistory(chatId) {
+    const history = CHAT_HISTORY.get(chatId)
+    if (history != undefined && history != null) {
+        const message = JSON.parse(history)
+        return message
+    } else {
+        return []
+    }
+}
+
+async function saveHistory(chatId, user: string, ai: string) {
+    let history: Array<Array<string>> = await getHistory(chatId)
+    const newChat: Array<string> = [user, ai]
+    if (history.length > CHAT_CONTEXT_NUMBER) {
+        console.log("history max to 100, remove the first one")
+        history.shift()
+    }
+    history.push(newChat)
+    CHAT_HISTORY.set(chatId, JSON.stringify(history))
+    return history
 }
 
 async function processChat(chatId, message, botToken, env) {
     //todo save history message
-    const update_message = await extractTelegramMessage(message, botToken, env)
-    const aiResponse = await chatWithAI(update_message, env);
-    const audioData = await textToSpeech(aiResponse, env)
-    const textMessage = await sendTextMessage(chatId, update_message, aiResponse, botToken)
+    const userMessage = await extractTelegramMessage(message, botToken, env)
+    const chatContext = await getContextMessage(chatId)
+    const aiMessage = await chatWithAI(userMessage, env, chatContext);
+    const audioData = await textToSpeech(aiMessage, env)
+    const textMessage = await sendTextMessage(chatId, userMessage, aiMessage, botToken)
     const voiceMessage = await sendVoiceMessage(chatId, audioData, botToken)
-    return textMessage
+    const history = await saveHistory(chatId, userMessage, aiMessage)
+    return Response.json(history)
 }
 
 async function processCommand(chatId, message, botToken, env) {
@@ -217,7 +289,6 @@ async function sendInlineButtons(chatId, token, text, buttons) {
         text: text
     }
     const url = buildTelegramUrl(BOT_SEND_MESSAGE, token, parameters)
-    console.log(url)
     const buttonResponse = await fetch(url);
     return buttonResponse
 
@@ -236,9 +307,7 @@ async function extractTelegramMessage(message, secret: string, env) {
 
 async function processVoiceMessage(message, secret: string, env) {
     const fileId = message.voice.file_id
-    console.log("file is is" + fileId)
     const fileData = await downloadTelegramFile(fileId, secret)
-    console.log(" download file data")
     const messageText = await speechToText(fileData, env)
     return messageText
 }
@@ -278,11 +347,11 @@ async function getTelegramFilePath(fileId: String, secret: string) {
     return fileInfo.result.file_path
 }
 
-async function chatWithAI(update_message: string, env) {
+async function chatWithAI(update_message: string, env, history = null) {
     const openAiKey = env.OPENAI_KEY
     const headers = buildOpenAiHeader(openAiKey)
     const openAiUrl = buildOpenAiUrl(OPEN_AI_API_CHAT)
-    const chatRequest = buildChatRequest(update_message)
+    const chatRequest = buildChatRequest(update_message, history)
     const aiResponse = await fetch(openAiUrl, {
         method: "post",
         headers: headers,
@@ -420,19 +489,23 @@ function buildOpenAiHeader(token: string) {
     return headers
 }
 
-function buildChatRequest(chat: string) {
+function buildChatRequest(chat: string, history = null) {
+    const systemRoleMessage = {
+        "role": "system",
+        "content": "The following is a conversation with an AI assistant. The AI assistant response with Japanese."
+    }
+    const newRoleMessage = {
+        "role": "user",
+        "content": chat
+    }
+    let messages = [systemRoleMessage]
+    if (null != history || undefined != history) {
+        messages = messages.concat(history)
+    }
+    messages = messages.concat([newRoleMessage])
     const chatRequest = {
         "model": "gpt-3.5-turbo",
-        "messages": [
-            {
-                "role": "system",
-                "content": "The following is a conversation with an AI assistant. The AI assistant response with Japanese."
-            },
-            {
-                "role": "user",
-                "content": chat
-            }
-        ]
+        "messages": messages
     }
     return JSON.stringify(chatRequest)
 
