@@ -1,4 +1,5 @@
 import * as builder from 'xmlbuilder';
+import set = Reflect.set;
 
 const API_WEBHOOK = '/bot'
 const API_REGISTER = '/registerWebhook'
@@ -36,24 +37,24 @@ const BUTTON_TOP = [
 const BUTTON_CONTEXT = [
     [
         {
-            text: '1',
-            callback_data: '1'
+            text: '0',
+            callback_data: 'ct_0'
         },
         {
             text: '4',
-            callback_data: '4'
+            callback_data: 'ct_4'
         },
         {
             text: '10',
-            callback_data: '10'
+            callback_data: 'ct_10'
         },
         {
             text: '30',
-            callback_data: '30'
+            callback_data: 'ct_30'
         },
         {
             text: '50',
-            callback_data: '50'
+            callback_data: 'ct_50'
         }
     ],
     [
@@ -63,8 +64,8 @@ const BUTTON_CONTEXT = [
         }
     ]
 ]
-
-
+const CHAT_CONTEXT_NUMBER = new Map<string, number>();
+const CHAT_HISTORY = new Map<String, Array<String>>()
 export default {
     async fetch(request, env) {
         return handleRequest(request, env)
@@ -154,19 +155,37 @@ function getChatId(message) {
 }
 
 async function replayCommand(chatId, command, botToken, env) {
+    console.log("command type is " + command)
     switch (command) {
         case "context":
-            const result = await sendInlineButtons(chatId, botToken, BUTTON_MESSAGE, BUTTON_CONTEXT)
-            console.log(await result.json())
+            let contextNumber = CHAT_CONTEXT_NUMBER.get(chatId)
+            contextNumber = contextNumber == undefined ? 0 : contextNumber
+            const message = "当前上下文数量" + contextNumber
+            const result = await sendInlineButtons(chatId, botToken, message, BUTTON_CONTEXT)
             return new Response("ok")
         case "tools":
-            return sendTextMessage(chatId, "", "工具正在开发中", botToken)
-
+            return await sendTextMessage(chatId, "", "工具正在开发中", botToken)
+        default :
+            return await replaySecondMand(chatId, command, botToken, env)
     }
+}
 
+async function replaySecondMand(chatId, command, botToken, env) {
+    if (command.startsWith("ct_")) {
+        return await setContext(chatId, command, botToken, env)
+    } else {
+        return new Response("ok")
+    }
+}
+
+async function setContext(chatId, command, botToken, env) {
+    const contextNum = command.replace("ct_", "")
+    CHAT_CONTEXT_NUMBER.set(chatId, contextNum)
+    return sendTextMessage(chatId, "", "上下文数量已经设置成" + contextNum, botToken)
 }
 
 async function processChat(chatId, message, botToken, env) {
+    //todo save history message
     const update_message = await extractTelegramMessage(message, botToken, env)
     const aiResponse = await chatWithAI(update_message, env);
     const audioData = await textToSpeech(aiResponse, env)
@@ -341,12 +360,19 @@ function buildSpeechRequestBody(text: string) {
     root.att('version', '1.0');
     root.att('xml:lang', 'ja-JP');
     // 子要素を追加
+    const markDownStartIndex = text.indexOf("```")
+    const markDownEndIndex = text.lastIndexOf("```")
+    let formatText = text
+    if (markDownStartIndex != -1 && markDownEndIndex != -1) {
+        formatText = text.substring(0, markDownStartIndex) + text.substring(markDownEndIndex + 3, text.length)
+    }
+    formatText = formatText.replace("\n", "")
     const voiceAttribute = {
         'xml:lang': 'ja-JP',
         'xml:gender': 'Female',
         'name': 'ja-JP-MayuNeural'
     }
-    root.ele('voice', voiceAttribute).txt(text);
+    root.ele('voice', voiceAttribute).txt(formatText);
     // XMLを文字列として出力
     const voiceRequestBody = root.end({pretty: true})
     return voiceRequestBody
@@ -459,3 +485,5 @@ function checkMessageType(update) {
         "data": message
     }
 }
+
+
