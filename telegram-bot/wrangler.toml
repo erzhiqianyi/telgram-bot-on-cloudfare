@@ -7,5 +7,10 @@ env = { }
 [triggers]
 crons = [ ]
 
+[[kv_namespaces]]
+preview_id = "13a5622d796843f099b0299b1942d6c3"
+id = "945770182a8f4b158f55349c10de9c7c"
+binding = "KV"
+
 [vars]
 SPEECH_REGION = "eastasia"

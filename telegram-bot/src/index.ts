@@ -76,6 +76,9 @@ const CHAT_MAX_NUM = 100
 const CHAT_CONTEXT_NUMBER = new Map<string, number>();
 const CHAT_HISTORY = new Map<String, String>()
 
+const KV_KEY_CONTEXT_NUMBER = "Context-"
+const KV_KEY_HISTORY = "History-"
+
 
 export default {
     async fetch(request, env) {
@@ -166,7 +169,7 @@ async function replayCommand(chatId, command, botToken, env) {
     console.log("command type is " + command)
     switch (command) {
         case "context":
-            let contextNumber = await getContextNum(chatId)
+            let contextNumber = await getContextNum(chatId, env)
             const message = "当前上下文数量" + contextNumber
             const result = await sendInlineButtons(chatId, botToken, message, BUTTON_CONTEXT)
             return new Response("ok")
@@ -188,23 +191,31 @@ async function replaySecondMand(chatId, command, botToken, env) {
 async function setContext(chatId, command, botToken, env) {
     const contextNum = command.replace("ct_", "")
     if (contextNum == "-1") {
-        return await clearHistory(chatId, botToken)
+        return await clearHistory(chatId, botToken, env)
     } else {
         CHAT_CONTEXT_NUMBER.set(chatId, contextNum)
+        await env.KV.put(KV_KEY_CONTEXT_NUMBER + chatId, contextNum);
         return await sendTextMessage(chatId, "", "上下文数量已经设置成" + contextNum, botToken)
     }
 }
 
-async function clearHistory(chatId, botToken) {
-    const history = await getHistory(chatId)
-    const allHistory = history.flat().join("\n")
-    CHAT_HISTORY.set(chatId, null)
-    return sendTextMessage(chatId, "聊天记录", allHistory, botToken)
+async function clearHistory(chatId, botToken, env) {
+    const message = await getHistory(chatId, env)
+    const history = message.message
+    if (null != history && undefined != history) {
+        const allHistory = history.flat().join("\n")
+        CHAT_HISTORY.set(chatId, null)
+        env.KV.put(KV_KEY_HISTORY + chatId, null)
+        return sendTextMessage(chatId, "聊天记录", allHistory, botToken)
+    } else {
+        return sendTextMessage(chatId, "聊天记录为空", "", botToken)
+    }
 }
 
-async function getContextMessage(chatId) {
-    const history = await getHistory(chatId)
-    const contextNum = await getContextNum(chatId)
+async function getContextMessage(chatId, env) {
+    const message = await getHistory(chatId, env)
+    const history = message.message
+    const contextNum = await getContextNum(chatId, env)
     if (contextNum == 0) {
         return []
     }
@@ -226,43 +237,65 @@ async function getContextMessage(chatId) {
 
 }
 
-async function getContextNum(chatId) {
+async function getContextNum(chatId, env) {
     let contextNumber = CHAT_CONTEXT_NUMBER.get(chatId)
     contextNumber = contextNumber == undefined ? 0 : contextNumber
+    if (contextNumber == 0) {
+        contextNumber = await env.KV.get(KV_KEY_CONTEXT_NUMBER + chatId) || 0;
+        if (contextNumber != null) {
+            CHAT_CONTEXT_NUMBER.set(chatId, contextNumber)
+        }
+    }
     return contextNumber
 }
 
-async function getHistory(chatId) {
-    const history = CHAT_HISTORY.get(chatId)
-    if (history != undefined && history != null) {
-        const message = JSON.parse(history)
-        return message
-    } else {
-        return []
+async function getHistory(chatId, env) {
+    let history = CHAT_HISTORY.get(chatId)
+    let isFromKv = false
+    if (history == undefined ||  history == null) {
+        history = await env.KV.get(KV_KEY_HISTORY + chatId)
+        isFromKv = true
     }
+    let message = []
+    if (history != undefined && history != null && history != "null") {
+        message = JSON.parse(history)
+    } else {
+        message = []
+        isFromKv = false
+    }
+    const result = {
+        "message": message,
+        "fromKv": isFromKv
+    }
+    return result
 }
 
-async function saveHistory(chatId, user: string, ai: string) {
-    let history: Array<Array<string>> = await getHistory(chatId)
+async function saveHistory(chatId, user: string, ai: string, env) {
+    const message = await getHistory(chatId, env)
+    let history: Array<Array<string>> = message.message
+    let isFromKv = message.fromKv
     const newChat: Array<string> = [user, ai]
-    if (history.length > CHAT_CONTEXT_NUMBER) {
+    if (history.length > CHAT_MAX_NUM) {
         console.log("history max to 100, remove the first one")
         history.shift()
     }
     history.push(newChat)
     CHAT_HISTORY.set(chatId, JSON.stringify(history))
+    if (!isFromKv) {
+        env.KV.put(KV_KEY_HISTORY + chatId, JSON.stringify(history))
+    }
     return history
 }
 
 async function processChat(chatId, message, botToken, env) {
     //todo save history message
     const userMessage = await extractTelegramMessage(message, botToken, env)
-    const chatContext = await getContextMessage(chatId)
+    const chatContext = await getContextMessage(chatId, env)
     const aiMessage = await chatWithAI(userMessage, env, chatContext);
     const audioData = await textToSpeech(aiMessage, env)
     const textMessage = await sendTextMessage(chatId, userMessage, aiMessage, botToken)
     const voiceMessage = await sendVoiceMessage(chatId, audioData, botToken)
-    const history = await saveHistory(chatId, userMessage, aiMessage)
+    const history = await saveHistory(chatId, userMessage, aiMessage, env)
     return Response.json(history)
 }
 
@@ -357,6 +390,7 @@ async function chatWithAI(update_message: string, env, history = null) {
         headers: headers,
         body: chatRequest
     });
+
     const aiData = await aiResponse.json();
     if ('choices' in aiData) {
         const aiChoices = aiData.choices[0].message.content;
